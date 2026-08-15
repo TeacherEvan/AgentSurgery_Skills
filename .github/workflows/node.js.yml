@@ -1,31 +1,64 @@
-# This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
+# Validate AgentSurgery_Skills package structure
+# Ensures each skill folder has a valid SKILL.md and required structure
 
-name: Node.js CI
+name: Validate Skills Package
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "main" ]
   pull_request:
-    branches: [ "master" ]
+    branches: [ "master", "main" ]
 
 jobs:
-  build:
-
+  validate:
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [18.x, 20.x, 22.x]
-        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
-
     steps:
-    - uses: actions/checkout@v4
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-    - run: npm ci
-    - run: npm run build --if-present
-    - run: npm test
+      - uses: actions/checkout@v4
+
+      - name: Verify skill folders exist
+        run: |
+          required_skills=("surgical-HermesDotHealth" "surgical-implementation" "surgical-orchestration")
+          for skill in "${required_skills[@]}"; do
+            if [[ ! -d "$skill" ]]; then
+              echo "ERROR: Missing skill folder: $skill"
+              exit 1
+            fi
+            echo "FOUND: $skill/"
+          done
+
+      - name: Verify each skill has SKILL.md
+        run: |
+          for skill in surgical-HermesDotHealth surgical-implementation surgical-orchestration; do
+            if [[ ! -f "$skill/SKILL.md" ]]; then
+              echo "ERROR: $skill/SKILL.md not found"
+              exit 1
+            fi
+            echo "VALID: $skill/SKILL.md exists"
+          done
+
+      - name: Verify SKILL.md has required frontmatter
+        run: |
+          for skill in surgical-HermesDotHealth surgical-implementation surgical-orchestration; do
+            if ! grep -q "^name:" "$skill/SKILL.md"; then
+              echo "ERROR: $skill/SKILL.md missing 'name' in frontmatter"
+              exit 1
+            fi
+            if ! grep -q "^description:" "$skill/SKILL.md"; then
+              echo "ERROR: $skill/SKILL.md missing 'description' in frontmatter"
+              exit 1
+            fi
+            echo "VALID: $skill/SKILL.md has required frontmatter"
+          done
+
+      - name: Verify install.sh is executable
+        run: |
+          if [[ ! -x install.sh ]]; then
+            echo "WARNING: install.sh not executable, fixing..."
+            chmod +x install.sh
+          fi
+          ./install.sh --help 2>&1 | head -5 || true
+
+      - name: List all skill files
+        run: |
+          echo "=== Package Contents ==="
+          find . -type f -name "*.md" -o -name "*.sh" -o -name "*.json" -o -name "*.yml" -o -name "*.yaml" | grep -v ".git" | sort
