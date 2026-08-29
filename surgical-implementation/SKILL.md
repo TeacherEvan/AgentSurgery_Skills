@@ -45,9 +45,11 @@ On EVERY invocation, before any other work:
 1. **Scan for plans.** `search_files` (or `rg`) for plan docs under the repo's
    `docs/` and `docs/plans/` (and the current working directory's parent folder):
    ```bash
-   # Enhanced pattern explicitly matching ASCII checkboxes, Unicode checkmarks, and keywords
-   rg -l -g 'docs/**/*.md' -i 'todo|objective|tick|plan|WIP|\[x\]|\[ \]|☑|✅' .
+   rg -l -g 'docs/**/*.md' -i 'todo|objective|tick|plan|WIP|\[x\]|\[ \]' .
    ```
+   ASCII-safe pattern only — unicode checkmarks (☑/✅) break the rg regex and
+   silently yield 0 matches. If you must match checked boxes, add a second pass:
+   `rg -l -g 'docs/**/*.md' '☑|✅' .`
    Also accept `agentplan`/`blueprint` JSON in `docs/plans/`.
 2. **Count `>0`?** If plan files exist:
    - `verify-implementation` — reconcile each plan objective against the live
@@ -105,12 +107,10 @@ findings exist.
 
 ## Approval Gates
 
-The governance strictness can be configured based on the environment (e.g., `strict`, `relaxed`):
-
 - **AUTO**: read, search, plan artifacts, non-destructive tests, static analysis.
-- **REVIEW**: broad refactors, security-sensitive changes, risky dep upgrades. *(In `relaxed` mode for local dev, these can be auto-approved after static analysis passes).*
+- **REVIEW**: broad refactors, security-sensitive changes, risky dep upgrades.
 - **APPROVAL_REQUIRED**: delete important data, destructive migration, production
-  deploy, credential rotation, permission changes, irreversible ops. *(Always required, regardless of mode).*
+  deploy, credential rotation, permission changes, irreversible ops.
 - **BLOCKED**: anything the host/user policy prohibits.
 
 ## Execution: surgical-orchestration mapping
@@ -149,17 +149,6 @@ When IMPLEMENT runs, hand the verified plan objectives to `surgical-orchestratio
 - `audit/SECURITY.md`, `audit/RISK.md` (if security audit ran)
 - Review findings: keep in `review_findings.md` (advisory) and OUT of the source
   commit (see code-review fast-path hygiene: explicit paths, never `git add -A`).
-
-### CI/CD Artifact Export
-
-If running in a CI/CD environment, automatically export these artifacts into a summary format compatible with CI pipeline dashboards (e.g., GitHub Actions Job Summary):
-
-```bash
-# Example: Combine artifacts into a CI summary
-echo "# Implementation Summary" > CI_SUMMARY.md
-cat audit/TRACEABILITY.md >> CI_SUMMARY.md
-cat review_findings.md >> CI_SUMMARY.md
-```
 
 ## Pitfalls carried from the source skills
 

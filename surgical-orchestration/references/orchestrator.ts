@@ -16,12 +16,6 @@ export const ORCHESTRATOR_CONFIG = {
   COMPACTION_TOKEN_THRESHOLD: 0.75,
 } as const;
 
-export interface OrchestrationOptions {
-  skipTests?: boolean;
-  maxConcurrency?: number;
-  testCommand?: string;
-}
-
 export type AgentRole =
   | 'WORKER'
   | 'VERIFIER'
@@ -212,13 +206,11 @@ export class SubagentManager extends EventEmitter {
   private activeAgents: Map<string, { role: AgentRole; startTime: number }> = new Map();
   private jobCard: JobCard;
   private dispatch: SubagentDispatcher;
-  private maxConcurrency: number;
 
-  constructor(jobCard: JobCard, dispatch?: SubagentDispatcher, maxConcurrency?: number) {
+  constructor(jobCard: JobCard, dispatch?: SubagentDispatcher) {
     super();
     this.jobCard = jobCard;
     this.dispatch = dispatch ?? defaultDispatcher;
-    this.maxConcurrency = maxConcurrency ?? ORCHESTRATOR_CONFIG.MAX_CONCURRENCY;
   }
 
   /**
@@ -240,7 +232,7 @@ export class SubagentManager extends EventEmitter {
    * Checks if a new subagent can be spawned (respects MAX_CONCURRENCY cap).
    */
   canSpawn(): boolean {
-    return this.getActiveCount() < this.maxConcurrency;
+    return this.getActiveCount() < ORCHESTRATOR_CONFIG.MAX_CONCURRENCY;
   }
 
   /**
@@ -461,26 +453,18 @@ export class OrchestrationEngine extends EventEmitter {
   protected manager: SubagentManager;
   private plan: BuildPlan;
   private skipTests: boolean;
-  private testCommand: string;
 
-  constructor(plan: BuildPlan, dispatch?: SubagentDispatcher, opts?: OrchestrationOptions) {
+  constructor(plan: BuildPlan, dispatch?: SubagentDispatcher, opts?: { skipTests?: boolean }) {
     super();
     this.plan = plan;
     this.skipTests = opts?.skipTests ?? false;
-    this.testCommand = opts?.testCommand ?? 'npx playwright test';
     this.jobCard = {
       planId: `BUILD-${Date.now()}`,
       jobs: new Map(),
       completedHashes: new Set(),
       overallStatus: 'IN_PROGRESS',
     };
-    this.manager = new SubagentManager(this.jobCard, dispatch, opts?.maxConcurrency);
-
-    // Bubble up events from SubagentManager
-    this.manager.on('spawn_requested', (data) => this.emit('spawn_requested', data));
-    this.manager.on('agent_completed', (data) => this.emit('agent_completed', data));
-    this.manager.on('agent_error', (data) => this.emit('agent_error', data));
-
+    this.manager = new SubagentManager(this.jobCard, dispatch);
     this.initializeJobCard(plan);
   }
 
@@ -547,7 +531,7 @@ export class OrchestrationEngine extends EventEmitter {
 
     // Step 3: Run Playwright tests
     this.jobCard.overallStatus = 'PLAYWRIGHT_TESTING';
-    const testResult = await this.runTests(ledger);
+    const testResult = await this.runPlaywrightTests(ledger);
 
     if (testResult.passed) {
       this.jobCard.overallStatus = 'COMPLETED';
@@ -683,9 +667,9 @@ Exit protocol: Emit JSON with status (COMPLETED|FAILED), files_modified, debrief
   }
 
   /**
-   * Runs tests against the modified codebase.
+   * Runs Playwright tests against the modified codebase.
    */
-  private async runTests(_ledger: CompactLedger): Promise<TestResult> {
+  private async runPlaywrightTests(_ledger: CompactLedger): Promise<TestResult> {
     const projectRoot = this.plan.changes[0]?.filePath ? path.dirname(this.plan.changes[0].filePath) : process.cwd();
     // Navigate to project root (find package.json)
     let root = projectRoot;
@@ -694,7 +678,7 @@ Exit protocol: Emit JSON with status (COMPLETED|FAILED), files_modified, debrief
     }
 
     try {
-      execSync(this.testCommand, {
+      execSync('npx playwright test', {
         cwd: root,
         stdio: 'pipe',
         timeout: 120000,

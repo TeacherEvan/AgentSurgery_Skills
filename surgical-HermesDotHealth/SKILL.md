@@ -73,11 +73,6 @@ Parse for:
 - Credential issues (see `hermes-credential-diagnostics`)
 - Model/provider connectivity failures
 
-To filter the output and highlight only actionable warnings and errors, you can use:
-```bash
-hermes doctor 2>&1 | grep -iE 'warning|error|fail|critical|issue'
-```
-
 ### 8. Broader system cache audit (Termux/Android focus)
 ```bash
 # Termux package cache
@@ -109,13 +104,6 @@ ps aux | grep -E "hermes|supervisord" | grep -v grep
 
 ## Cleanup Actions (require user approval)
 
-Before proceeding with any cleanup, it is highly recommended to **backup configuration files**:
-```bash
-mkdir -p ~/.hermes/backups/config_$(date +%s)
-find ~/.hermes -maxdepth 1 -name "*.yaml" -o -name "*.yml" -o -name "*.json" -o -name "*.toml" -exec cp {} ~/.hermes/backups/config_$(date +%s)/ \;
-echo "Configs backed up to ~/.hermes/backups/config_$(date +%s)"
-```
-
 | Finding | Safe to remove? | Command |
 |---|---|---|
 | `~/.hermes/cache/*` | Yes (regenerated) | `rm -rf ~/.hermes/cache/*` |
@@ -125,33 +113,6 @@ echo "Configs backed up to ~/.hermes/backups/config_$(date +%s)"
 | `~/.npm`, `~/.cache/yarn` | Yes | `npm cache clean --force` |
 | Stale `*.bak`, `*.backup` files | Yes | `find ~/.hermes -name "*.bak" -delete` |
 | Old session DBs (`.db-journal`, `.db-wal`) | If no active process | `find ~/.hermes -name "*.db-*" -delete` |
-
-### Automated Safe Cleanup Script
-
-For automated execution of safe cleanup tasks, you can use the following snippet (requires review and approval):
-
-```bash
-#!/bin/bash
-echo "Starting safe cleanup..."
-# Backup configs first
-mkdir -p ~/.hermes/backups/config_$(date +%s)
-find ~/.hermes -maxdepth 1 -name "*.yaml" -o -name "*.yml" -o -name "*.json" -o -name "*.toml" -exec cp {} ~/.hermes/backups/config_$(date +%s)/ \;
-echo "1. Configs backed up."
-
-# Clear cache
-rm -rf ~/.hermes/cache/* 2>/dev/null
-echo "2. Hermes cache cleared."
-
-# Prune old logs
-find ~/.hermes/logs -name "*.log" -mtime +30 -delete 2>/dev/null
-echo "3. Logs older than 30 days pruned."
-
-# Remove stale bak files
-find ~/.hermes -name "*.bak" -delete 2>/dev/null
-echo "4. Stale .bak files removed."
-
-echo "Safe cleanup complete!"
-```
 
 ## Reporting Template
 
