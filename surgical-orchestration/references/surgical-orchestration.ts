@@ -138,11 +138,15 @@ function printHelp(): void {
   console.log('Surgical Orchestration Engine (Hermes Integration)');
   console.log('');
   console.log('Usage:');
-  console.log('  npx tsx surgical-orchestration.ts <build-plan.json>   Execute build plan');
-  console.log('  npx tsx surgical-orchestration.ts --dry-run <plan>    Walk the state machine, spawn nothing');
-  console.log('  npx tsx surgical-orchestration.ts --init             Generate sample build plan');
+  console.log('  npx tsx surgical-orchestration.ts <build-plan.json> [--concurrency <N>] [--test-cmd <cmd>]');
+  console.log('  npx tsx surgical-orchestration.ts --dry-run <plan>  Walk the state machine, spawn nothing');
+  console.log('  npx tsx surgical-orchestration.ts --init           Generate sample build plan');
   console.log('');
-  console.log('Configuration:');
+  console.log('Options:');
+  console.log('  --concurrency <N>   Set max concurrent subagents (default: 2)');
+  console.log('  --test-cmd <cmd>    Override test command (default: "npx playwright test")');
+  console.log('');
+  console.log('Configuration Defaults:');
   console.log(`  MAX_CONCURRENCY: ${ORCHESTRATOR_CONFIG.MAX_CONCURRENCY}`);
   console.log(`  MAX_REVISION_CYCLES: ${ORCHESTRATOR_CONFIG.MAX_REVISION_CYCLES}`);
   console.log(`  SUBAGENT_TIMEOUT_MS: ${ORCHESTRATOR_CONFIG.SUBAGENT_TIMEOUT_MS}`);
@@ -167,12 +171,31 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  const dryRun = args[0] === '--dry-run';
-  const review = args[0] === '--review';
-  const planArg = dryRun || review ? args[1] : args[0];
+  const dryRun = args.includes('--dry-run');
+  const review = args.includes('--review');
+  const positionalArgs = args.filter(a => !a.startsWith('--') && !args[args.indexOf(a) - 1]?.startsWith('--'));
+  const planArg = positionalArgs[0];
   if (!planArg) {
     console.error('Missing <build-plan.json>');
     return 1;
+  }
+
+  // Parse custom CLI options
+  let maxConcurrency: number | undefined;
+  let testCommand: string | undefined;
+
+  const concurrencyIdx = args.indexOf('--concurrency');
+  if (concurrencyIdx !== -1 && args.length > concurrencyIdx + 1) {
+    maxConcurrency = parseInt(args[concurrencyIdx + 1], 10);
+    if (isNaN(maxConcurrency) || maxConcurrency < 1) {
+      console.error('Invalid concurrency value.');
+      return 1;
+    }
+  }
+
+  const testCmdIdx = args.indexOf('--test-cmd');
+  if (testCmdIdx !== -1 && args.length > testCmdIdx + 1) {
+    testCommand = args[testCmdIdx + 1];
   }
 
   const planPath = resolve(planArg);
@@ -200,12 +223,29 @@ async function main(): Promise<number> {
   console.log('[ORCHESTRATOR] Starting Surgical Orchestration...');
   console.log(`Plan: ${plan.description}`);
   console.log(`Changes: ${plan.changes.length} files`);
+  if (maxConcurrency) console.log(`Concurrency Limit: ${maxConcurrency}`);
+  if (testCommand) console.log(`Test Command: ${testCommand}`);
 
-  const engine = new OrchestrationEngine(plan, dryRun ? dryRunDispatcher : hermesDispatcher, { skipTests: dryRun });
+  const engine = new OrchestrationEngine(plan, dryRun ? dryRunDispatcher : hermesDispatcher, {
+    skipTests: dryRun,
+    maxConcurrency,
+    testCommand
+  });
 
   engine.on('test_fixer_requested', ({ context }: { context: string }) => {
     console.log('\n[TEST-FIXER] Context prepared for test-fixer subagent:');
     console.log(`${context.substring(0, 500)}...`);
+  });
+
+  // Progress Visualization
+  engine.on('spawn_requested', ({ agentId, payload }: any) => {
+    console.log(`[>>] Spawning ${payload.role} (${agentId}) for scope: ${payload.allowedFolderScope}`);
+  });
+  engine.on('agent_completed', ({ agentId, result }: any) => {
+    console.log(`[OK] Agent ${agentId} finished with status: ${result.status}`);
+  });
+  engine.on('agent_error', ({ agentId, error }: any) => {
+    console.error(`[!!] Agent ${agentId} failed with error: ${error.message}`);
   });
 
   try {
