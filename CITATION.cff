@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software in a publication, please use the metadata below.
+type: software
+title: AgentSurgery_Skills
+version: 1.0.0
+date-released: 2026-09-05
+license: MIT
+authors:
+  - family-names: TeacherEvan
+    given-names: Hermes Agent
+    affiliation: AgentSurgery
+url: https://github.com/TeacherEvan/AgentSurgery_Skills
+repository-code: https://github.com/TeacherEvan/AgentSurgery_Skills
+keywords:
+  - hermes-agent
+  - surgical-skills
+  - orchestration
+  - multi-agent
+  - code-review
+  - dotnet-health

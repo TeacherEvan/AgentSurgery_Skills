@@ -58,6 +58,10 @@ jobs:
           fi
           ./install.sh --help 2>&1 | head -5 || true
 
+
+      - name: Validate skill description is substantive
+        run: bash .github/workflows/scripts/check-skill-descriptions.sh
+
       - name: List all skill files
         run: |
           echo "=== Package Contents ==="
