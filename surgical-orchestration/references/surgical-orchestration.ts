@@ -173,7 +173,19 @@ async function main(): Promise<number> {
 
   const dryRun = args.includes('--dry-run');
   const review = args.includes('--review');
-  const positionalArgs = args.filter(a => !a.startsWith('--') && !args[args.indexOf(a) - 1]?.startsWith('--'));
+  // Extract positional args, skipping the VALUES of flags that consume one
+  // (--concurrency N, --test-cmd CMD). Boolean flags (--review, --dry-run) do
+  // NOT consume the next arg, so a plan path following --review must survive.
+  const valueFlags = new Set(['--concurrency', '--test-cmd']);
+  const positionalArgs: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith('--')) {
+      if (valueFlags.has(a)) i++; // skip the flag's value too
+      continue;
+    }
+    positionalArgs.push(a);
+  }
   const planArg = positionalArgs[0];
   if (!planArg) {
     console.error('Missing <build-plan.json>');
