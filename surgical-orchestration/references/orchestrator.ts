@@ -47,7 +47,7 @@ export interface SubagentPayload {
 }
 
 export interface SubagentResult {
-  status: 'COMPLETED' | 'FAILED';
+  status: 'COMPLETED' | 'FAILED' | 'ESCALATED';
   filesModified: string[];
   debrief: string;
   selfAudit: string;
@@ -400,19 +400,35 @@ export class StandardCodeReviewer implements CodeReviewLayer {
   }
 
   private async dispatchReviewer(role: 'FRONTEND_REVIEWER' | 'BACKEND_REVIEWER', lane: FileLane, files: string[]): Promise<ReviewerSummary> {
-    const result = await this.dispatch(`reviewer-${role}`, {
-      missionId: `REVIEW-${role}`,
-      role,
-      allowedFolderScope: '.',
-      instructions:
-        `## ${role} Mission\n` +
-        `Lane: ${lane}\n` +
-        `Files to review (${files.length}):\n${files.map((f) => `- ${f}`).join('\n')}\n\n` +
-        `Review for best practices, correctness, security, and the two surgical-orchestration principals.\n` +
-        `Return JSON: { status, files_modified, debrief, self_audit, recommendations:[..], suggestions:[..] }.\n` +
-        `Provide exactly 2 recommendations and 2 suggestions for the Code Reviewer.`,
-      contextSummary: `Reviewing ${lane} lane; ${files.length} files.`,
-    });
+    let result: SubagentResult;
+    try {
+      result = await this.dispatch(`reviewer-${role}`, {
+        missionId: `REVIEW-${role}`,
+        role,
+        allowedFolderScope: '.',
+        instructions:
+          `## ${role} Mission\n` +
+          `Lane: ${lane}\n` +
+          `Files to review (${files.length}):\n${files.map((f) => `- ${f}`).join('\n')}\n\n` +
+          `Review for best practices, correctness, security, and the two surgical-orchestration principals.\n` +
+          `Return JSON: { status, files_modified, debrief, self_audit, recommendations:[..], suggestions:[..] }.\n` +
+          `Provide exactly 2 recommendations and 2 suggestions for the Code Reviewer.`,
+        contextSummary: `Reviewing ${lane} lane; ${files.length} files.`,
+      });
+    } catch (error: any) {
+      // A reviewer dispatch failure (timeout, rate-limit, network) must not
+      // abort the whole sweep — the surviving reviewer still yields 2+2 and
+      // the row differs from baseline on wall_ms, which is the sweep's point.
+      const msg = error?.message ?? String(error);
+      return {
+        role,
+        lane,
+        filesReviewed: files,
+        summary: `ESCALATED: ${msg}`,
+        recommendations: [],
+        suggestions: [],
+      };
+    }
 
     return {
       role,
@@ -579,7 +595,20 @@ export class OrchestrationEngine extends EventEmitter {
         contextSummary: JSON.stringify(ledger),
       };
 
-      const workerResult = await this.manager.spawnSubagent(workerPayload);
+      const workerResult = await this.spawnSubagentWithEscalation(
+        jobId,
+        job,
+        workerPayload,
+        'WORKER',
+      );
+
+      // Timeout / dispatch failure escalated the job — stop the loop here
+      // rather than feeding a dead result into the verifier (which would
+      // also time out and burn the revision budget for nothing).
+      if (job.status === ('ESCALATED' as JobStatus)) {
+        return;
+      }
+
       // Hash the CANONICAL payload (scope + sorted file list + debrief), not the
       // bare debrief string. Hashing the string alone made two different folders
       // that happened to emit the same sentence collide, escalating a healthy
@@ -633,6 +662,55 @@ export class OrchestrationEngine extends EventEmitter {
     }
 
     job.status = 'ESCALATED';
+  }
+
+  /**
+   * Wraps spawnSubagent so a timeout / dispatch failure escalates the job
+   * instead of aborting the whole engine run. The timeout watchdog is a
+   * legitimate escalation signal (the dispatcher was too slow), not a fatal
+   * engine error — the engine must keep processing remaining jobs.
+   */
+  private async spawnSubagentWithEscalation(
+    jobId: string,
+    job: FolderJob,
+    payload: SubagentPayload,
+    role: 'WORKER' | 'VERIFIER',
+  ): Promise<SubagentResult> {
+    try {
+      return await this.manager.spawnSubagent(payload);
+    } catch (error: any) {
+      const msg = error?.message ?? String(error);
+      const isTimeout = msg.includes('[TIMEOUT]');
+      if (isTimeout) {
+        job.status = 'ESCALATED';
+        job.debriefHistory.push({
+          attempt: job.attempts + 1,
+          agentRole: role,
+          hash: '',
+          debrief: `ESCALATED: ${msg}`,
+        });
+        this.emit('agent_error', { agentId: payload.missionId, error });
+        return {
+          status: 'ESCALATED',
+          filesModified: [],
+          debrief: msg,
+          selfAudit: `timeout-escalated (${role})`,
+          recommendations: [],
+          suggestions: [],
+        } as SubagentResult;
+      }
+      // Non-timeout dispatch failure — escalate rather than abort the run.
+      job.status = 'ESCALATED';
+      this.emit('agent_error', { agentId: payload.missionId, error });
+      return {
+        status: 'ESCALATED',
+        filesModified: [],
+        debrief: msg,
+        selfAudit: `dispatch-failed (${role})`,
+        recommendations: [],
+        suggestions: [],
+      } as SubagentResult;
+    }
   }
 
   /**
